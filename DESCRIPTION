@@ -30,8 +30,5 @@ Imports:
     pairwise,
     reshape2,
     ltm,
-    tidySEM,
-    blavaan,
 Remotes: twolodzko/equi,
          cran/mixRasch
-        
