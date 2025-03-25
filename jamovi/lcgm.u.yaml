@@ -75,6 +75,19 @@ children:
         stretchFactor: 1
         children:
           - type: Label
+            label: 'Missing Values Method'
+            children:
+              - type: RadioButton
+                name: miss_fiml
+                optionName: miss
+                optionPart: fiml
+                label: Full information maximum likelihood
+              - type: RadioButton
+                name: miss_listwise
+                optionName: miss
+                optionPart: listwise
+                label: Exclude cases listwise
+          - type: Label
             label: 'Tables'
             children:
               - type: LayoutBox
@@ -88,11 +101,11 @@ children:
                     name: est
                   - type: CheckBox
                     name: cp
-              - type: Label
-                label: Save
-                children:
-                  - type: Output
-                    name: mem
+          - type: Label
+            label: Save
+            children:
+              - type: Output
+                name: mem
       - type: LayoutBox
         stretchFactor: 1
         margin: large
