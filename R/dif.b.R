@@ -9,13 +9,35 @@ difClass <- if (requireNamespace('jmvcore', quietly = TRUE))
     private = list(
       .htmlwidget = NULL,
       
+      # Helper function for setting plot sizes
+      .configureAllPlots = function() {
+        plotConfigs <- list(
+          list(option = "plot1", width = "width1", height = "height1"),
+          list(option = "plot2", width = "width2", height = "height2"),
+          list(option = "plot3", width = "width3", height = "height3"),
+          list(option = "plot4", width = "width4", height = "height4"),
+          list(option = "plot5", width = "width5", height = "height5"),
+          list(option = "plot6", width = "width6", height = "height6"),
+          list(option = "plot7", width = "width7", height = "height7"),
+          list(option = "plot8", width = "width8", height = "height8")
+        )
+        
+        for (config in plotConfigs) {
+          if (isTRUE(self$options[[config$option]])) {
+            width <- self$options[[config$width]]
+            height <- self$options[[config$height]]
+            self$results[[config$option]]$setSize(width, height)
+          }
+        }
+      },
+      
       .init = function() {
         private$.htmlwidget <- HTMLWidget$new()
         
         if (is.null(self$data) | is.null(self$options$vars)) {
           self$results$instructions$setVisible(visible = TRUE)
-          
         }
+        
         self$results$instructions$setContent(private$.htmlwidget$generate_accordion(
           title = "Instructions",
           content = paste(
@@ -26,421 +48,213 @@ difClass <- if (requireNamespace('jmvcore', quietly = TRUE))
             '<li>For partial credit model, the grouping variable should be coded as <b>1 and 2</b>.</li>',
             '<li>Feature requests and bug reports can be made on my <a href="https://github.com/hyunsooseol/snowRMM/issues" target="_blank">GitHub</a>.</li>',
             '</ul></div></div>'
-            
           )
         ))
-        if (isTRUE(self$options$plot1)) {
-          width <- self$options$width1
-          height <- self$options$height1
-          self$results$plot1$setSize(width, height)
-        }
-        if (isTRUE(self$options$plot2)) {
-          width <- self$options$width2
-          height <- self$options$height2
-          self$results$plot2$setSize(width, height)
-        }
         
-        if (isTRUE(self$options$plot3)) {
-          width <- self$options$width3
-          height <- self$options$height3
-          self$results$plot3$setSize(width, height)
-        }
-        
-        if (isTRUE(self$options$plot4)) {
-          width <- self$options$width4
-          height <- self$options$height4
-          self$results$plot4$setSize(width, height)
-        }
-        
-        if (isTRUE(self$options$plot5)) {
-          width <- self$options$width5
-          height <- self$options$height5
-          self$results$plot5$setSize(width, height)
-        }
-        
-        if (isTRUE(self$options$plot6)) {
-          width <- self$options$width6
-          height <- self$options$height6
-          self$results$plot6$setSize(width, height)
-        }
-        
-        if (isTRUE(self$options$plot7)) {
-          width <- self$options$width7
-          height <- self$options$height7
-          self$results$plot7$setSize(width, height)
-        }
-        
-        if (isTRUE(self$options$plot8)) {
-          width <- self$options$width8
-          height <- self$options$height8
-          self$results$plot8$setSize(width, height)
-        }
+        # Configure all plot sizes at once
+        private$.configureAllPlots()
         
         if (length(self$options$vars) <= 1)
           self$setStatus('complete')
-        
       },
-      ###############################################################
-      .run = function() {
-        #   vars <- self$options$vars
-        #   facs <- self$options$facs
-        #   #get the data--------
-        #   data <- self$data
-        #   data <- jmvcore::naOmit(data)
-        #   # convert to appropriate data types
-        #   for (i in seq_along(vars))
-        #     data[[i]] <- jmvcore::toNumeric(data[[i]])
-        #
-        #   for (fac in facs)
-        #     data[[fac]] <- as.factor(data[[fac]])
-        # # data is now all of the appropriate type we can begin!
-        #   data <- na.omit(data)
-        #   data <- jmvcore::select(data, self$options$vars)
-        data <- self$data
-        groupVarName <- self$options$facs
-        vars <- self$options$vars
-        varNames <- c(groupVarName, vars)
+      
+      # Process DIF analysis for dichotomous model
+      .processDichotomousModel = function(data, vars) {
+        # Fit dichotomous model
+        dicho <- eRm::RM(data[, -1])
+        subgroup_diffs <- eRm::Waldtest(dicho, splitcr = data[[self$options$facs]])
         
-        if (is.null(groupVarName))
+        # Process Z statistic table
+        table <- self$results$z
+        items <- self$options$vars
+        
+        z <- as.vector(subgroup_diffs$coef.table)
+        p <- as.vector(subgroup_diffs$coef.table[, 2])
+        
+        for (i in seq_along(items)) {
+          row <- list()
+          row[["zstat"]] <- z[i]
+          row[["p"]] <- p[i]
+          table$setRow(rowKey = items[i], values = row)
+        }
+        
+        # Z plot
+        comparison <- as.data.frame(subgroup_diffs$coef.table)
+        self$results$plot1$setState(comparison)
+        
+        # Process item parameters by Group
+        # Overall difficulty
+        over <- as.vector(dicho$betapar)
+        se <- as.vector(dicho$se.beta)
+        
+        # Create objects for subgroup-specific item difficulties
+        subgroup_1_diffs <- subgroup_diffs$betapar1
+        subgroup_2_diffs <- subgroup_diffs$betapar2
+        
+        se1 <- subgroup_diffs$se.beta1
+        se2 <- subgroup_diffs$se.beta2
+        
+        comp <- data.frame(over, se, subgroup_1_diffs, se1, subgroup_2_diffs, se2)
+        
+        # Comparison table
+        table <- self$results$comp
+        
+        for (i in seq_along(items)) {
+          row <- list()
+          row[["over"]] <- comp$over[i]
+          row[["se"]] <- comp$se[i]
+          row[["g1"]] <- comp$subgroup_1_diffs[i]
+          row[["se1"]] <- comp$se1[i]
+          row[["g2"]] <- comp$subgroup_2_diffs[i]
+          row[["se2"]] <- comp$se2[i]
+          table$setRow(rowKey = items[i], values = row)
+        }
+        
+        # Prepare data for line plot
+        comp1 <- data.frame(
+          item = self$options$vars,
+          Overall = over,
+          group1 = subgroup_1_diffs,
+          group2 = subgroup_2_diffs
+        )
+        
+        p <- reshape2::melt(comp1, id.vars = c('item'))
+        colnames(p) <- c("Item", "Group", "Value")
+        
+        # Line plot
+        self$results$plot2$setState(p)
+        
+        # Scatterplot of item difference
+        state <- list(subgroup_1_diffs, subgroup_2_diffs, se1, se2)
+        self$results$plot3$setState(state)
+        
+        # Bar plot of item difference
+        item_dif <- (subgroup_1_diffs * -1) - (subgroup_2_diffs * -1)
+        state <- list(as.vector(item_dif), subgroup_1_diffs)
+        self$results$plot4$setState(state)
+      },
+      
+      # Process DIF analysis for partial credit model
+      .processPartialCreditModel = function(data, vars) {
+        PC_model <- eRm::PCM(data[, -1])
+        
+        responses <- data[, -1]
+        responses.g <- cbind.data.frame(data[[self$options$facs]], responses)
+        
+        responses.g1 <- subset(responses.g, data[[self$options$facs]] == 1)
+        responses.g2 <- subset(responses.g, data[[self$options$facs]] == 2)
+        
+        # Compare thresholds between groups
+        subgroup_diffs <- eRm::Waldtest(PC_model, splitcr = data[[self$options$facs]])
+        
+        # Initialize vectors for storing results
+        group1_item.diffs.overall <- numeric(ncol(responses))
+        group2_item.diffs.overall <- numeric(ncol(responses))
+        group_item.diffs.overall <- numeric(ncol(responses))
+        group1_item.se.overall <- numeric(ncol(responses))
+        group2_item.se.overall <- numeric(ncol(responses))
+        
+        # Calculate overall difficulties and SEs for each item and group
+        for (item.number in 1:ncol(responses)) {
+          # Group 1
+          n.thresholds.g1 <- length(table(responses.g1[, item.number + 1])) - 1
+          idx_range1 <- ((item.number * n.thresholds.g1) - (n.thresholds.g1 - 1)):(item.number * n.thresholds.g1)
+          group1_item.diffs.overall[item.number] <- mean(subgroup_diffs$betapar1[idx_range1]) * -1
+          group1_item.se.overall[item.number] <- mean(subgroup_diffs$se.beta1[idx_range1])
+          
+          # Group 2
+          n.thresholds.g2 <- length(table(responses.g2[, item.number + 1])) - 1
+          idx_range2 <- ((item.number * n.thresholds.g2) - (n.thresholds.g2 - 1)):(item.number * n.thresholds.g2)
+          group2_item.diffs.overall[item.number] <- mean(subgroup_diffs$betapar2[idx_range2]) * -1
+          group2_item.se.overall[item.number] <- mean(subgroup_diffs$se.beta2[idx_range2])
+          
+          # Overall
+          n.thresholds.g <- length(table(responses.g[, item.number + 1])) - 1
+          idx_range <- ((item.number * n.thresholds.g) - (n.thresholds.g - 1)):(item.number * n.thresholds.g)
+          group_item.diffs.overall[item.number] <- mean(PC_model$betapar[idx_range]) * -1
+        }
+        
+        # Calculate test statistics for item comparisons
+        z1 <- (group1_item.diffs.overall - group2_item.diffs.overall) /
+          sqrt(group1_item.se.overall ^ 2 + group2_item.se.overall ^ 2)
+        
+        p <- 2 * pnorm(-abs(z1))
+        
+        # Z table
+        table <- self$results$z1
+        items <- self$options$vars
+        
+        for (i in seq_along(items)) {
+          row <- list()
+          row[["zstat"]] <- z1[i]
+          row[["p"]] <- p[i]
+          table$setRow(rowKey = items[i], values = row)
+        }
+        
+        # Plot z statistics
+        self$results$plot5$setState(z1)
+        
+        # Item difficulty table
+        table <- self$results$comp1
+        
+        for (i in seq_along(items)) {
+          row <- list()
+          row[["over"]] <- group_item.diffs.overall[i]
+          row[["g1"]] <- group1_item.diffs.overall[i]
+          row[["g2"]] <- group2_item.diffs.overall[i]
+          table$setRow(rowKey = items[i], values = row)
+        }
+        
+        # Prepare data for line plot
+        comp2 <- data.frame(
+          item = self$options$vars,
+          overall = group_item.diffs.overall,
+          group1 = group1_item.diffs.overall,
+          group2 = group2_item.diffs.overall
+        )
+        
+        par <- reshape2::melt(comp2, id.vars = c('item'))
+        colnames(par) <- c("Item", "Group", "Value")
+        
+        # Line plot
+        self$results$plot6$setState(par)
+        
+        # Scatter plot
+        state <- list(group1_item.diffs.overall, 
+                      group2_item.diffs.overall, 
+                      group1_item.se.overall, 
+                      group2_item.se.overall)
+        self$results$plot7$setState(state)
+        
+        # Bar plot of item difference
+        item_dif <- group1_item.diffs.overall - group2_item.diffs.overall
+        state <- list(as.vector(item_dif), group1_item.diffs.overall)
+        self$results$plot8$setState(state)
+      },
+      
+      .run = function() {
+        # Check if we have required data
+        if (is.null(self$options$facs) || length(self$options$vars) == 0)
           return()
+        
+        # Prepare data
+        vars <- self$options$vars
+        groupVarName <- self$options$facs
+        varNames <- c(groupVarName, vars)
         
         data <- jmvcore::select(self$data, varNames)
         for (var in vars)
           data[[var]] <- jmvcore::toNumeric(data[[var]])
-        # exclude rows with missings in the grouping variable
+        
+        # Exclude rows with missings in the grouping variable
         data <- data[!is.na(data[[groupVarName]]), ]
         
-        # Example----------------------------------------------
-        #https://bookdown.org/chua/new_rasch_demo2/DIF.html
-        # dichot_model <- RM(raschdat1)
-        # # Create subgroup classifications:
-        # subgroups <- sample(1:2, 100, replace = TRUE)
-        # # Calculate subgroup-specific item difficulty values:
-        # subgroup_diffs <- Waldtest(dichot_model, splitcr = subgroups)
-        #
-        # # Create objects for subgroup-specific item difficulties:
-        # subgroup_1_diffs <- subgroup_diffs$betapar1
-        # subgroup_2_diffs <- subgroup_diffs$betapar2
-        #
-        # #store results from item comparisons in an object called "comparisons"
-        # comparisons <- as.data.frame(subgroup_diffs$coef.table)
-        #
+        # Process based on selected model
         if (self$options$model == 'dicho') {
-          dicho <- eRm::RM(data[, -1])
-          subgroup_diffs <- eRm::Waldtest(dicho, splitcr = data[[groupVarName]])
-          
-          
-          # Z statistic table--------------
-          table <- self$results$z
-          items <- self$options$vars
-          
-          # get result---
-          z <- as.vector(subgroup_diffs$coef.table)
-          p <- as.vector(subgroup_diffs$coef.table[, 2])
-          
-          
-          for (i in seq_along(items)) {
-            row <- list()
-            row[["zstat"]] <- z[i]
-            row[["p"]] <- p[i]
-            table$setRow(rowKey = items[i], values = row)
-          }
-          # z plot1---------
-          comparison <- as.data.frame(subgroup_diffs$coef.table)
-          image1 <- self$results$plot1
-          image1$setState(comparison)
-          
-          # Plot2(item parameters by Group)----------
-          
-          # Overall difficulty--------
-          over <- as.vector(dicho$betapar)
-          se <- as.vector(dicho$se.beta)
-          
-          # Create objects for subgroup-specific item difficulties:
-          subgroup_1_diffs <- subgroup_diffs$betapar1
-          subgroup_2_diffs <- subgroup_diffs$betapar2
-          
-          se1 <- subgroup_diffs$se.beta1
-          se2 <- subgroup_diffs$se.beta2
-          
-          comp <- data.frame(over, se, subgroup_1_diffs, se1, subgroup_2_diffs, se2)
-          
-          # Name the columns of the results
-          #  names(comp) <- c("group1", "group2")
-          
-          # Comparison table---------
-          
-          table <- self$results$comp
-          items <- self$options$vars
-          
-          # get result---
-          
-          over <- comp[, 1]
-          se <- comp[, 2]
-          g1 <- comp[, 3]
-          se1 <- comp[, 4]
-          g2 <- comp[, 5]
-          se2 <- comp[, 6]
-          
-          for (i in seq_along(items)) {
-            row <- list()
-            row[["over"]] <- over[i]
-            row[["se"]] <- se[i]
-            row[["g1"]] <- g1[i]
-            row[["se1"]] <- se1[i]
-            row[["g2"]] <- g2[i]
-            row[["se2"]] <- se2[i]
-            table$setRow(rowKey = items[i], values = row)
-          }
-          # Melting for line plot--------------------------
-          comp1 <- data.frame(self$options$vars,
-                              over,
-                              subgroup_1_diffs,
-                              subgroup_2_diffs)
-          
-          # Name the columns of the results
-          names(comp1) <- c("item", "Overall", "group1", "group2")
-          
-          p <- reshape2::melt(comp1, id.vars = c('item'))
-          colnames(p) <- c("Item", "Group", "Value")
-          
-          # self$results$text$setContent(comp)
-          
-          # Line plot---------
-          image2   <-  self$results$plot2
-          image2$setState(p)
-          
-          # Scatterplot of item difference-----------
-          # Create objects for subgroup-specific item difficulties:
-          
-          subgroup_1_diffs <- subgroup_diffs$betapar1
-          subgroup_2_diffs <- subgroup_diffs$betapar2
-          
-          se1 <- subgroup_diffs$se.beta1
-          se2 <- subgroup_diffs$se.beta2
-          
-          state <- list(subgroup_1_diffs, subgroup_2_diffs, se1, se2)
-          image3 <- self$results$plot3
-          image3$setState(state)
-          
-          # Bar plot of item difference-----------
-          
-          # First, calculate difference in difficulty between subgroups
-          # Note that I multiplied by -1 to reflect item difficulty rather than easiness (eRm quirk):
-          item_dif <- (subgroup_1_diffs * -1) - (subgroup_2_diffs *
-                                                   -1)
-          
-          
-          # Bar plot code:
-          item_dif <- as.vector(item_dif)
-          subgroup_1_diffs <- subgroup_diffs$betapar1
-          
-          image4 <- self$results$plot4
-          
-          state <- list(item_dif, subgroup_1_diffs)
-          image4$setState(state)
+          private$.processDichotomousModel(data, vars)
+        } else if (self$options$model == 'partial') {
+          private$.processPartialCreditModel(data, vars)
         }
-        ###########################################################
-        
-        if (self$options$model == 'partial') {
-          PC_model <- eRm::PCM(data[, -1])
-          
-          
-          #- First, get overall item difficulties specific to each subgroup:
-          group1_item.diffs.overall <- NULL
-          group2_item.diffs.overall <- NULL
-          group_item.diffs.overall <- NULL
-          
-          
-          responses <- data[, -1]
-          responses.g <- cbind.data.frame(data[[groupVarName]], responses)
-          
-          #------------------------------
-          responses.g1 <- subset(responses.g, data[[groupVarName]] == 1)
-          responses.g2 <- subset(responses.g, data[[groupVarName]] == 2)
-          
-          ## Compare thresholds between groups----------------
-          subgroup_diffs <- Waldtest(PC_model, splitcr = data[[groupVarName]])
-          
-          
-          for (item.number in 1:ncol(responses)) {
-            n.thresholds.g1 <-  length(table(responses.g1[, item.number + 1])) - 1
-            
-            group1_item.diffs.overall[item.number] <- mean(subgroup_diffs$betapar1[((item.number *
-                                                                                       (n.thresholds.g1)) - (n.thresholds.g1 - 1)):(item.number * (n.thresholds.g1))]) *
-              -1
-            
-            n.thresholds.g2 <-  length(table(responses.g2[, item.number +
-                                                            1])) - 1
-            
-            group2_item.diffs.overall[item.number] <- mean(subgroup_diffs$betapar2[((item.number *
-                                                                                       (n.thresholds.g2)) - (n.thresholds.g2 - 1)):(item.number * (n.thresholds.g2))]) *
-              -1
-          }
-          
-          # Overal difficulties-----------
-          
-          for (item.number in 1:ncol(responses)) {
-            n.thresholds.g <-  length(table(responses.g[, item.number + 1])) - 1
-            
-            group_item.diffs.overall[item.number] <- mean(PC_model$betapar[((item.number *
-                                                                               (n.thresholds.g)) - (n.thresholds.g - 1)):(item.number * (n.thresholds.g))]) *
-              -1
-          }
-          
-          # self$results$text$setContent(group_item.diffs.overall)
-          
-          ## Get overall item SE values:
-          
-          #- First, get overall SEs specific to each subgroup:
-          
-          group1_item.se.overall <- NULL
-          group2_item.se.overall <- NULL
-          
-          responses <- data[, -1]
-          responses.g <- cbind.data.frame(data[[groupVarName]], responses)
-          
-          responses.g1 <- subset(responses.g, data[[groupVarName]] == 1)
-          responses.g2 <- subset(responses.g, data[[groupVarName]] == 2)
-          
-          ## Compare thresholds between groups:
-          subgroup_diffs <- Waldtest(PC_model, splitcr = data[[groupVarName]])
-          
-          
-          for (item.number in 1:ncol(responses)) {
-            n.thresholds.g1 <-  length(table(responses.g1[, item.number + 1])) - 1
-            
-            group1_item.se.overall[item.number] <- mean(subgroup_diffs$se.beta1[((item.number *
-                                                                                    (n.thresholds.g1)) - (n.thresholds.g1 - 1)):(item.number * (n.thresholds.g1))])
-            
-            n.thresholds.g2 <-  length(table(responses.g2[, item.number +
-                                                            1])) - 1
-            
-            group2_item.se.overall[item.number] <- mean(subgroup_diffs$se.beta2[((item.number *
-                                                                                    (n.thresholds.g2)) - (n.thresholds.g2 - 1)):(item.number * (n.thresholds.g2))])
-          }
-          
-          
-          # Calculate test statistics for item comparisons:
-          z1 <- (group1_item.diffs.overall - group2_item.diffs.overall) /
-            sqrt(group1_item.se.overall ^ 2 + group2_item.se.overall ^
-                   2)
-          
-          p <- 2 * pnorm(-abs(z1))
-          
-          # z table------------
-          table <- self$results$z1
-          items <- self$options$vars
-          
-          
-          for (i in seq_along(items)) {
-            row <- list()
-            
-            row[["zstat"]] <- z1[i]
-            row[["p"]] <- p[i]
-            
-            table$setRow(rowKey = items[i], values = row)
-          }
-          
-          
-          # plot5-------------
-          
-          image5 <- self$results$plot5
-          image5$setState(z1)
-          
-          ### Item difficulty table--------
-          
-          comp1 <- data.frame(
-            group_item.diffs.overall,
-            group1_item.diffs.overall,
-            group2_item.diffs.overall
-          )
-          
-          # Name the columns of the results
-          # names(comp1) <- c("group1", "group2")
-          
-          
-          # Comparison table---------
-          table <- self$results$comp1
-          items <- self$options$vars
-          
-          # get result---
-          over <- comp1[, 1]
-          g1 <- comp1[, 2]
-          g2 <- comp1[, 3]
-          
-          
-          for (i in seq_along(items)) {
-            row <- list()
-            
-            row[["over"]] <- over[i]
-            row[["g1"]] <- g1[i]
-            row[["g2"]] <- g2[i]
-            
-            
-            table$setRow(rowKey = items[i], values = row)
-          }
-          
-          # Melting for plot--------------------------
-          
-          comp2 <- data.frame(
-            self$options$vars,
-            group_item.diffs.overall,
-            group1_item.diffs.overall,
-            group2_item.diffs.overall
-          )
-          
-          # Name the columns of the results
-          names(comp2) <- c("item", "overall", "group1", "group2")
-          
-          par <- reshape2::melt(comp2, id.vars = c('item'))
-          colnames(par) <- c("Item", "Group", "Value")
-          
-          # Line plot---------
-          image6  <-  self$results$plot6
-          image6$setState(par)
-          
-          
-          # Scatter plot for partial credit model------------------
-          
-          total <- cbind.data.frame(
-            c(1:length(group1_item.diffs.overall)),
-            group1_item.diffs.overall,
-            group1_item.se.overall,
-            group2_item.diffs.overall,
-            group2_item.se.overall
-          )
-          
-          
-          group1_item.diffs.overall <- total$group1_item.diffs.overall
-          group2_item.diffs.overall <- total$group2_item.diffs.overall
-          
-          se1 <-  group1_item.se.overall
-          se2 <- group2_item.se.overall
-          
-          state <- list(group1_item.diffs.overall,
-                        group2_item.diffs.overall,
-                        se1,
-                        se2)
-          image7 <- self$results$plot7
-          image7$setState(state)
-          
-          
-          # Bar plot of item difference-----------
-          
-          item_dif <- group1_item.diffs.overall - group2_item.diffs.overall
-          
-          item_dif <- as.vector(item_dif)
-          
-          
-          image8 <- self$results$plot8
-          state <- list(item_dif, group1_item.diffs.overall)
-          image8$setState(state)
-          
-          
-          
-        }
-        
       },
       
       .plot1 = function(image1, ggtheme, theme, ...) {
@@ -448,8 +262,7 @@ difClass <- if (requireNamespace('jmvcore', quietly = TRUE))
           return(FALSE)
         
         comparisons <- image1$state
-        
-        
+
         min.y <- ifelse(ceiling(min(comparisons$`z-statistic`)) > -3, -3, ceiling(min(comparisons$`z-statistic`)))
         
         max.y <- ifelse(ceiling(max(comparisons$`z-statistic`)) < 3, 3, ceiling(max(comparisons$`z-statistic`)))
@@ -475,11 +288,8 @@ difClass <- if (requireNamespace('jmvcore', quietly = TRUE))
           col = c("black", "red"),
           cex = .7
         )
-        
-        
         print(plot1)
         TRUE
-        
       },
       
       .plot2 = function(image2, ggtheme, theme, ...) {
@@ -501,10 +311,8 @@ difClass <- if (requireNamespace('jmvcore', quietly = TRUE))
         if (self$options$angle > 0) {
           plot2 <- plot2 + ggplot2::theme(axis.text.x = ggplot2::element_text(angle = self$options$angle, hjust = 1))
         }
-        
         print(plot2)
         TRUE
-        
       },
       
       .plot3 = function(image3, ggtheme, theme, ...) {
@@ -582,11 +390,8 @@ difClass <- if (requireNamespace('jmvcore', quietly = TRUE))
           lty = c(NA, 1, 2),
           col = c("black", "purple", "red")
         )
-        
-        
         print(plot3)
         TRUE
-        
       },
       
       .plot4 = function(image4, ggtheme, theme, ...) {
@@ -595,17 +400,13 @@ difClass <- if (requireNamespace('jmvcore', quietly = TRUE))
         
         item_dif <- image4$state[[1]]
         subgroup_1_diffs <- image4$state[[2]]
-        
-        
         nvars <- length(self$options$vars)
         # Code to use different colors to highlight items with differences >= .5 logits:
         colors <- NULL
-        
         for (item.number in 1:nvars) {
           colors[item.number] <- ifelse(abs(item_dif[item.number]) > .5, "dark blue", "light green")
           
         }
-        
         plot4 <- barplot(
           item_dif,
           horiz = TRUE,
@@ -647,11 +448,8 @@ difClass <- if (requireNamespace('jmvcore', quietly = TRUE))
           col = c("dark blue", "light green"),
           cex = .7
         )
-        
-        
         print(plot4)
         TRUE
-        
       },
       
       .plot5 = function(image5, ggtheme, theme, ...) {
@@ -694,10 +492,8 @@ difClass <- if (requireNamespace('jmvcore', quietly = TRUE))
           col = c("black", "red"),
           cex = 0.8
         )
-        
         print(plot5)
         TRUE
-        
       },
       
       .plot6 = function(image6, ggtheme, theme, ...) {
@@ -719,10 +515,8 @@ difClass <- if (requireNamespace('jmvcore', quietly = TRUE))
         if (self$options$angle1 > 0) {
           plot6 <- plot6 + ggplot2::theme(axis.text.x = ggplot2::element_text(angle = self$options$angle1, hjust = 1))
         }
-        
         print(plot6)
         TRUE
-        
       },
       
       .plot7 = function(image7, ggtheme, theme, ...) {
@@ -800,11 +594,8 @@ difClass <- if (requireNamespace('jmvcore', quietly = TRUE))
           lty = c(NA, 1, 2),
           col = c("black", "purple", "red")
         )
-        
-        
         print(plot7)
         TRUE
-        
       },
       
       .plot8 = function(image8, ggtheme, theme, ...) {
@@ -864,10 +655,8 @@ difClass <- if (requireNamespace('jmvcore', quietly = TRUE))
           col = c("dark blue", "light green"),
           cex = .7
         )
-        
         print(plot8)
         TRUE
-        
       }
     )
   )

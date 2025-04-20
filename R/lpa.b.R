@@ -1,4 +1,3 @@
-
 #' @importFrom tidyLPA get_data
 
 lpaClass <- if (requireNamespace('jmvcore', quietly = TRUE))
@@ -6,7 +5,12 @@ lpaClass <- if (requireNamespace('jmvcore', quietly = TRUE))
     "lpaClass",
     inherit = lpaBase,
     private = list(
-      .allCache = NULL,
+      .modelCache = NULL,     
+      .fitCache = NULL,       
+      .estimatesCache = NULL, 
+      .profileDataCache = NULL, 
+      .postProbCache = NULL, 
+      .elbowDataCache = NULL, 
       .htmlwidget = NULL,
       
       .init = function() {
@@ -14,7 +18,6 @@ lpaClass <- if (requireNamespace('jmvcore', quietly = TRUE))
         
         if (is.null(self$data) | is.null(self$options$vars)) {
           self$results$instructions$setVisible(visible = TRUE)
-          
         }
         
         self$results$instructions$setContent(private$.htmlwidget$generate_accordion(
@@ -27,42 +30,37 @@ lpaClass <- if (requireNamespace('jmvcore', quietly = TRUE))
             '<li>Four models(1,2,3,6) are specified using <b>mclust</b> R package.</li>',
             '<li>Feature requests and bug reports can be made on my <a href="https://github.com/hyunsooseol/snowRMM/issues" target="_blank">GitHub</a>.</li>',
             '</ul></div></div>'
-            
           )
         ))
         
+       
         if (isTRUE(self$options$plot)) {
           width <- self$options$width
           height <- self$options$height
-          
           self$results$plot$setSize(width, height)
         }
         
         if (isTRUE(self$options$plot1)) {
           width <- self$options$width1
           height <- self$options$height1
-          
           self$results$plot1$setSize(width, height)
         }
         
         if (isTRUE(self$options$plot3)) {
           width <- self$options$width2
           height <- self$options$height2
-          
           self$results$plot3$setSize(width, height)
         }
         
         if (isTRUE(self$options$plot2)) {
           width <- self$options$width3
           height <- self$options$height3
-          
           self$results$plot2$setSize(width, height)
         }
         
         if (isTRUE(self$options$plot4)) {
           width <- self$options$width4
           height <- self$options$height4
-          
           self$results$plot4$setSize(width, height)
         }
       },
@@ -71,16 +69,51 @@ lpaClass <- if (requireNamespace('jmvcore', quietly = TRUE))
         if (length(self$options$vars) < 2)
           return()
         
-        if (is.null(private$.allCache)) {
-          private$.allCache <- private$.computeRES()
+      
+        gc(verbose = FALSE)
+        
+       
+        if (isTRUE(self$options$overall) || isTRUE(self$options$fit) || 
+            isTRUE(self$options$est) || isTRUE(self$options$pc) || 
+            isTRUE(self$options$post) || isTRUE(self$options$plot1) || 
+            isTRUE(self$options$plot3) || isTRUE(self$options$plot4)) {
+          
+         
+          if (is.null(private$.modelCache)) {
+            
+            mem_start <- gc(reset = TRUE)
+            
+          
+            data <- jmvcore::naOmit(self$data)
+            set.seed(1234)
+            private$.modelCache <- tidyLPA::estimate_profiles(
+              data,
+              self$options$nc,
+              variances = self$options$variances, 
+              covariances = self$options$covariances
+            )
+            
+          
+            rm(data)
+            gc(verbose = FALSE)
+          }
         }
         
-        all <- private$.allCache
+       
+        if (isTRUE(self$options$plot2) && is.null(private$.elbowDataCache)) {
+          
+          private$.elbowDataCache <- private$.computeELBOW()
+        }
+        
+        
+        if (isTRUE(self$options$overall) && is.null(private$.fitCache)) {
+          private$.fitCache <- private$.computeBEST()
+        }
         
         #Best model fit table---
         if (isTRUE(self$options$overall)) {
           table <- self$results$overall
-          f <- all$bestfit
+          f <- private$.fitCache
           
           lapply(rownames(f), function(name) {
             row <- list(
@@ -100,10 +133,11 @@ lpaClass <- if (requireNamespace('jmvcore', quietly = TRUE))
             table$addRow(rowKey = name, values = row)
           })
         }
-        # Fit measres----------
+        
+        # Fit measures----------
         if (isTRUE(self$options$fit)) {
           table <- self$results$fit
-          df <- as.data.frame(all$res[[1]]$fit)
+          df <- as.data.frame(private$.modelCache[[1]]$fit)
           
           lapply(rownames(df), function(name) {
             row <- list(value = df[name, 1])
@@ -115,10 +149,14 @@ lpaClass <- if (requireNamespace('jmvcore', quietly = TRUE))
         if (isTRUE(self$options$est)) {
           table <- self$results$est
           
-          # get estimates--------------
-          set.seed(1234)
-          e <- tidyLPA::get_estimates(all$res)
-          e <- as.data.frame(e)
+          # 추정값이 없으면 계산
+          if (is.null(private$.estimatesCache)) {
+            set.seed(1234)
+            private$.estimatesCache <- tidyLPA::get_estimates(private$.modelCache)
+            private$.estimatesCache <- as.data.frame(private$.estimatesCache)
+          }
+          
+          e <- private$.estimatesCache
           
           lapply(rownames(e), function(name) {
             row <- list(
@@ -139,27 +177,35 @@ lpaClass <- if (requireNamespace('jmvcore', quietly = TRUE))
         if (isTRUE(self$options$pc)) {
           base::options(max.print = .Machine$integer.max)
           
-          pc <- tidyLPA::get_data(all$res)
-          pc <- as.factor(pc$Class)
-          #pc <- as.factor(pc)
-          if (self$options$pc
-              && self$results$pc$isNotFilled()) {
-            self$results$pc$setValues(pc)
-            self$results$pc$setRowNums(rownames(data))
+          
+          if (is.null(private$.profileDataCache)) {
+            private$.profileDataCache <- tidyLPA::get_data(private$.modelCache)
+            private$.profileDataCache <- as.factor(private$.profileDataCache$Class)
           }
+          
+          pc <- private$.profileDataCache
+          
+          if (self$options$pc && self$results$pc$isNotFilled()) {
+            self$results$pc$setValues(pc)
+            self$results$pc$setRowNums(rownames(self$data))
+          }
+          
           image <- self$results$plot
           image$setState(pc)
         }
         
         # Posterior probabilities---
         if (isTRUE(self$options$post)) {
-          post <- tidyLPA::get_data(all$res, "posterior_probabilities")
-          post_name <- paste0("CPROB", 1:self$options$nc)
-          post <- post[, post_name, drop = FALSE]
-          post <- data.frame(post)
+        
+          if (is.null(private$.postProbCache)) {
+            post <- tidyLPA::get_data(private$.modelCache, "posterior_probabilities")
+            post_name <- paste0("CPROB", 1:self$options$nc)
+            private$.postProbCache <- post[, post_name, drop = FALSE]
+          }
           
-          if (self$options$post
-              && self$results$post$isNotFilled()) {
+          post <- data.frame(private$.postProbCache)
+          
+          if (self$options$post && self$results$post$isNotFilled()) {
             keys <- 1:self$options$nc
             measureTypes <- rep("continuous", self$options$nc)
             
@@ -172,7 +218,8 @@ lpaClass <- if (requireNamespace('jmvcore', quietly = TRUE))
               descriptions = descriptions,
               measureTypes = measureTypes
             )
-            self$results$pc$setRowNums(rownames(data))
+            
+            self$results$pc$setRowNums(rownames(self$data))
             for (i in 1:self$options$nc) {
               scores <- as.numeric(post[, i])
               self$results$post$setValues(index = i, scores)
@@ -180,97 +227,21 @@ lpaClass <- if (requireNamespace('jmvcore', quietly = TRUE))
           }
         }
         
-        # #https://github.com/data-edu/tidyLPA/issues/198
-        # # Not resolved yet.
-        # # correlation plot----------
-        # if(isTRUE(self$options$plot)){
-        #
-        # image <- self$results$plot
-        # image$setState(all$res)
-        # }
-        
-        # Latent profile plot(Box plot)----------
-        
+        # Latent profile plot (Box plot)----------
         if (isTRUE(self$options$plot1)) {
           image1 <- self$results$plot1
-          image1$setState(all$res)
+          image1$setState(private$.modelCache)
         }
         
-        # Latent profile plot(Line plot)----------
-        
+        # Latent profile plot (Line plot)----------
         if (isTRUE(self$options$plot4)) {
           image4 <- self$results$plot4
-          image4$setState(all$res)
+          image4$setState(private$.modelCache)
         }
         
         # elbow plot----------
-        
-        if (isTRUE(self$options$plot2)) {
-          # vars <- self$options$vars
-          # nc <- self$options$nc
-          # variances <- self$options$variances
-          # covariances <- self$options$covariances
-          #
-          # data <- self$data
-          # data <- jmvcore::naOmit(data)
-          #
-          # out <- NULL
-          #
-          # for (i in 1:self$options$nc) {
-          #   set.seed(1234)
-          #   res <- tidyLPA::estimate_profiles(
-          #     data,
-          #     n_profiles = i,
-          #     variances = variances,
-          #     covariances = covariances
-          #   )
-          #
-          #   res <- res[[1]]
-          #   df <- data.frame(res$fit)
-          #   df <- t(df)
-          #   model <- df[1]
-          #   class <- df[2]
-          #   log <- df[3]
-          #   aic <- df[4]
-          #   awe <- df[5]
-          #   bic <- df[6]
-          #   caic <- df[7]
-          #   clc <- df[8]
-          #   kic <- df[9]
-          #   sabic <- df[10]
-          #   icl <- df[11]
-          #   entropy <- df[12]
-          #   df <- data.frame(model,
-          #                    log,
-          #                    aic,
-          #                    awe,
-          #                    bic,
-          #                    caic,
-          #                    clc,
-          #                    kic,
-          #                    sabic,
-          #                    icl,
-          #                    entropy,
-          #                    class)
-          #   if (is.null(out)) {
-          #     out <- df
-          #   } else {
-          #     out <- rbind(out, df)
-          #   }
-          # }
-          # out <- out
-          # # Elbow plot---
-          # out1 <- out[, c(3:10, 12), ]
-          # colnames(out1) <- c('AIC',
-          #                     'AWE',
-          #                     'BIC',
-          #                     'CAIC',
-          #                     'CLC',
-          #                     'KIC',
-          #                     'SABIC',
-          #                     'ICL',
-          #                     'Class')
-          out <- private$.allCache$elbow_data
+        if (isTRUE(self$options$plot2) && !is.null(private$.elbowDataCache)) {
+          out <- private$.elbowDataCache
           out1 <- out[, c(3:10, 12)]
           colnames(out1) <- c('AIC',
                               'AWE',
@@ -281,25 +252,117 @@ lpaClass <- if (requireNamespace('jmvcore', quietly = TRUE))
                               'SABIC',
                               'ICL',
                               'Class')
+          
           elbow <- reshape2::melt(
             out1,
             id.vars = 'Class',
             variable.name = "Fit",
             value.name = 'Value'
           )
+          
           image <- self$results$plot2
           image$setState(elbow)
         }
         
         if (isTRUE(self$options$plot3)) {
-          res1 <- all$res
           image <- self$results$plot3
-          image$setState(res1)
+          image$setState(private$.modelCache)
         }
+        
+       
+        gc(verbose = FALSE)
       },
       
-      # pLOT---
-      # Percentage of class
+    
+      .computeELBOW = function() {
+     
+        nc <- self$options$nc
+        variances <- self$options$variances
+        covariances <- self$options$covariances
+        data <- jmvcore::naOmit(self$data)
+        
+      
+        processChunk <- function(i) {
+          set.seed(1234)
+          temp_res <- tidyLPA::estimate_profiles(
+            data,
+            n_profiles = i,
+            variances = variances,
+            covariances = covariances
+          )
+          
+         
+          temp_fit <- temp_res[[1]]$fit
+          df <- data.frame(temp_fit)
+          df <- t(df)
+          df <- data.frame(
+            model = df[1],
+            log = df[3],
+            aic = df[4],
+            awe = df[5],
+            bic = df[6],
+            caic = df[7],
+            clc = df[8],
+            kic = df[9],
+            sabic = df[10],
+            icl = df[11],
+            entropy = df[12],
+            class = df[2]
+          )
+          
+        
+          rm(temp_res, temp_fit)
+          gc(verbose = FALSE)
+          
+          return(df)
+        }
+        
+     
+        out <- NULL
+        for (i in 1:nc) {
+          result_chunk <- processChunk(i)
+          if (is.null(out)) {
+            out <- result_chunk
+          } else {
+            out <- rbind(out, result_chunk)
+          }
+         
+          rm(result_chunk)
+          gc(verbose = FALSE)
+        }
+        
+       
+        rm(data)
+        gc(verbose = FALSE)
+        
+        return(out)
+      },
+      
+   
+      .computeBEST = function() {
+       
+        nc <- self$options$nc
+        data <- jmvcore::naOmit(self$data)
+        
+       
+        set.seed(1234)
+        best <- tidyLPA::estimate_profiles(data, n_profiles = 2:nc, models = c(1, 2, 3, 6))
+        
+       
+        sol <- tidyLPA::compare_solutions(best)
+        self$results$text$setContent(sol)
+        
+      
+        result <- as.data.frame(tidyLPA::get_fit(best))
+        
+       
+        rm(data, best, sol)
+        gc(verbose = FALSE)
+        
+        return(result)
+      },
+      
+     
       .plot = function(image, ggtheme, theme, ...) {
         if (is.null(image$state))
           return(FALSE)
@@ -322,18 +385,6 @@ lpaClass <- if (requireNamespace('jmvcore', quietly = TRUE))
       },
       
       .plot3 = function(image, ggtheme, theme, ...) {
-        # vars <- self$options$vars
-        # nc <- self$options$nc
-        # variances <- self$options$variances
-        # covariances <- self$options$covariances
-        # data <- self$data
-        # data <- jmvcore::naOmit(data)
-        #
-        # set.seed(1234)
-        # res1 <- tidyLPA::estimate_profiles(data,
-        #                                    1:self$options$nc,
-        #                                    variances = variances,
-        #                                    covariances = covariances)
         if (is.null(image$state))
           return(FALSE)
         
@@ -351,12 +402,11 @@ lpaClass <- if (requireNamespace('jmvcore', quietly = TRUE))
         plot2 <- ggplot2::ggplot(elbow, ggplot2::aes(x = Class, y = Value, color = Fit)) +
           ggplot2::geom_line(size = 1.1) +
           ggplot2::geom_point(size = 3) +
-          ggplot2::scale_x_continuous(breaks = seq(1, length(elbow$Class), by = 1))
+          ggplot2::scale_x_continuous(breaks = seq(1, length(unique(elbow$Class)), by = 1))
         
         plot2 <- plot2 + ggtheme
         print(plot2)
         TRUE
-        
       },
       
       .plot1 = function(image1, ggtheme, theme, ...) {
@@ -402,85 +452,9 @@ lpaClass <- if (requireNamespace('jmvcore', quietly = TRUE))
         
         print(plot4)
         TRUE
-        
-      },
-      
-      .computeRES = function() {
-        vars <- self$options$vars
-        nc <- self$options$nc
-        variances <- self$options$variances
-        covariances <- self$options$covariances
-        
-        data <- self$data
-        data <- jmvcore::naOmit(data)
-        
-        # Best Model fit---------
-        # res<- iris %>%
-        #   select(Sepal.Length, Sepal.Width, Petal.Length, Petal.Width) %>%
-        #   estimate_profiles(n_profiles = 2:4, models = c(1, 2, 3, 6)) %>%
-        #   get_fit() %>%
-        #   as.data.frame()
-        # res
-        set.seed(1234)
-        #elbow plot---
-        out <- NULL
-        for (i in 1:nc) {
-          set.seed(1234)
-          temp_res <- tidyLPA::estimate_profiles(
-            data,
-            n_profiles = i,
-            variances = variances,
-            covariances = covariances
-          )
-          
-          if (i == nc) {
-            res <- temp_res
-          }
-          
-          temp_res <- temp_res[[1]]
-          df <- data.frame(temp_res$fit)
-          df <- t(df)
-          df <- data.frame(
-            model = df[1],
-            log = df[3],
-            aic = df[4],
-            awe = df[5],
-            bic = df[6],
-            caic = df[7],
-            clc = df[8],
-            kic = df[9],
-            sabic = df[10],
-            icl = df[11],
-            entropy = df[12],
-            class = df[2]
-          )
-          
-          if (is.null(out)) {
-            out <- df
-          } else {
-            out <- rbind(out, df)
-          }
-        }
-        #Estimates profile------------------------
-        res <- tidyLPA::estimate_profiles(data, nc, variances = variances, covariances = covariances)
-        #------------------------------------------
-        best <-  tidyLPA::estimate_profiles(data, n_profiles = 2:nc, models = c(1, 2, 3, 6))
-        
-        # Compare solution
-        sol <- tidyLPA::compare_solutions(best)
-        self$results$text$setContent(sol)
-        
-        bestfit <- as.data.frame(tidyLPA::get_fit(best))
-        #bestfit <- as.data.frame(allfit)
-        
-        retlist <- list(res = res,
-                        bestfit = bestfit,
-                        elbow_data = out)
-        return(retlist)
       }
     )
   )
-
 # if (isTRUE(self$options$overall)) {
 #   table <- self$results$overall
 #   f <- all$bestfit
