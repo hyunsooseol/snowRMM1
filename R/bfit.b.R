@@ -1,28 +1,16 @@
 # This file is a generated template, your changes will not be overwritten
 
+
 bfitClass <- if (requireNamespace('jmvcore'))
   R6::R6Class(
     "bfitClass",
     inherit = bfitBase,
     private = list(
       .htmlwidget = NULL,
-      .boot_stat_memoised = NULL, 
       
       ###### .init function--------
       
       .init = function() {
-        private$.boot_stat_memoised <- memoise::memoise(function(data, indices, stat, step) {
-          d <- data[indices, ]
-          res1 <- mixRasch::mixRasch(
-            data = d, 
-            steps = step,
-            model = "RSM",
-            n.c = 1
-          )
-          stat.raw <- res1$item.par$in.out[, stat]
-          return(stat.raw)
-        })
-        
         if (self$options$mode == 'simple') {
           private$.htmlwidget <- HTMLWidget$new()
           
@@ -158,6 +146,19 @@ bfitClass <- if (requireNamespace('jmvcore'))
           } else{
             set.seed(1234)
             fit <- iarm::boot_fit(obj, B = bn1, p.adj = adj)
+            ###################################################################
+            # Correction methods was made------------------------------------
+            
+            # if(type=='bi'){
+            #
+            #   obj<- eRm::RM(data)
+            #   fit<- iarm::boot_fit(obj,B=bn1,p.adj=adj)
+            #
+            # } else{
+            #
+            #   obj<- eRm::PCM(data)
+            #   fit<- iarm::boot_fit(obj,B=bn1,p.adj=adj)
+            # }
             
             # Outfit------------
             
@@ -200,6 +201,13 @@ bfitClass <- if (requireNamespace('jmvcore'))
             }
           }
         }
+        ### Caution ####
+        
+        # When the estimates  do not converged(for example, all 0 or 1)
+        # The error message will be shown (number of items to replace is not a multiple of replacement length)
+        
+        # get variables-------
+        
         data <- self$data
         vars <- self$options$vars
         
@@ -227,88 +235,57 @@ bfitClass <- if (requireNamespace('jmvcore'))
       },
       
       .compute = function(data) {
+        # get variables--------
+        # data <- self$data
         vars <- self$options$vars
         step <- self$options$step
         bn <- self$options$bn
-
-        self$results$text$setContent("Starting bootstrap. Please wait...")
-        #self$setStatus('Starting bootstrap. . .')
+        
+        
         set.seed(1234)
-        if(bn > 1000) {
-          chunk_size <- 500
-          chunks <- ceiling(bn / chunk_size)
-          
-          infit_results <- list()
-          outfit_results <- list()
-          
-          for(i in 1:chunks) {
-            start_idx <- (i-1) * chunk_size + 1
-            end_idx <- min(i * chunk_size, bn)
-            current_size <- end_idx - start_idx + 1
-            
-            # self$setStatus(paste0('Computing... (', round(100 * (i-1) / chunks), '%)'))
-            # Sys.sleep(0.1)
-            #self$results$text$setContent(sprintf("진행 중: %d%% 완료", round(100 * (i-1) / chunks)))
-            boot.in.chunk <- boot::boot(
-              data = data,
-              statistic = function(d, idx) {
-                return(private$.boot_stat_memoised(d, idx, 1, step))
-              },
-              R = current_size
-            )
-            boot.out.chunk <- boot::boot(
-              data = data,
-              statistic = function(d, idx) {
-                return(private$.boot_stat_memoised(d, idx, 3, step))
-              },
-              R = current_size
-            )
-            
-            infit_results[[i]] <- boot.in.chunk$t
-            outfit_results[[i]] <- boot.out.chunk$t
-            
-            if(i == 1) {
-              infit.raw <- boot.in.chunk$t0
-              outfit.raw <- boot.out.chunk$t0
-            }
-          }
-          #self$setStatus('Completed!')
-          infit <- do.call(rbind, infit_results)
-          outfit <- do.call(rbind, outfit_results)
-          
-          infit <- infit[1:bn,]
-          outfit <- outfit[1:bn,]
-        } else {
-
-          set.seed(1234)
-          
-          boot.in <- boot::boot(
-            data = data,
-            statistic = function(d, idx) {
-              return(private$.boot_stat_memoised(d, idx, 1, step))
-            },
-            R = bn
+        # Define bootstrapped infit and outfit statistic functions
+        # boot.stat <- function(data, indices, stat) {
+        #   d = data[indices,]
+        #   res1 <- mixRasch::mixRasch(data = d, steps = step, model = "RSM", n.c = 1)
+        #   stat.raw <- res1$item.par$in.out[, stat]
+        #   return(stat.raw)
+        # }
+        
+        # Using memoise package---
+        boot_stat_memoised <- memoise::memoise(function(data, indices, stat) {
+          d <- data[indices, ]
+          res1 <- mixRasch::mixRasch(
+            data = d,
+            steps = step,
+            model = "RSM",
+            n.c = 1
           )
-          
-          boot.out <- boot::boot(
-            data = data,
-            statistic = function(d, idx) {
-              return(private$.boot_stat_memoised(d, idx, 3, step))
-            },
-            R = bn
-          )
-          
-          infit.raw <- boot.in$t0
-          infit <- boot.in$t
-          outfit.raw <- boot.out$t0
-          outfit <- boot.out$t
-        }
+          stat.raw <- res1$item.par$in.out[, stat]
+          return(stat.raw)
+        })
         
-        self$results$text1$setContent("Bootstrapping completed.")
+        # Perform bootstrapping for infit and outfit
+        boot.in <- boot::boot(
+          data = data,
+          statistic = boot_stat_memoised,
+          stat = 1,
+          R = bn
+        )
+        boot.out <- boot::boot(
+          data = data,
+          statistic = boot_stat_memoised,
+          stat = 3,
+          R = bn
+        )
         
-        
+        # Extract original infit and outfit statistics and confidence intervals
+        infit.raw <- boot.in$t0
+        infit <- boot.in$t
         infitlow <- apply(infit, 2, quantile, prob = 0.025)
         infithigh <- apply(infit, 2, quantile, prob = 0.975)
+        
+        outfit.raw <- boot.out$t0
+        outfit <- boot.out$t
         outfitlow <- apply(outfit, 2, quantile, prob = 0.025)
         outfithigh <- apply(outfit, 2, quantile, prob = 0.975)
         
@@ -327,19 +304,22 @@ bfitClass <- if (requireNamespace('jmvcore'))
       .populateInTable = function(results) {
         table <- self$results$item$binfit
         vars <- self$options$vars
+        bn <- self$options$bn
         
         # results------
         infit <- results$infit
         infitlow <- results$infitlow
         infithigh <- results$infithigh
         
-        rows_data <- list()
         for (i in seq_along(vars)) {
           row <- list()
+          
           row[["infit"]] <- infit[i]
           row[["infitlow"]] <- infitlow[i]
           row[["infithigh"]] <- infithigh[i]
+          
           table$setRow(rowKey = vars[i], values = row)
+          
         }
       },
       
@@ -350,12 +330,13 @@ bfitClass <- if (requireNamespace('jmvcore'))
         outfitlow <- results$outfitlow
         outfithigh <- results$outfithigh
         
-        rows_data <- list()
         for (i in seq_along(vars)) {
           row <- list()
+          
           row[["outfit"]] <- outfit[i]
           row[['outfitlow']] <- outfitlow[i]
           row[['outfithigh']] <- outfithigh[i]
+          
           table$setRow(rowKey = vars[i], values = row)
         }
       },
@@ -363,22 +344,19 @@ bfitClass <- if (requireNamespace('jmvcore'))
       # prepare confidence interval plot-----------
       
       .prepareInPlot = function(results) {
+        inplot <- self$results$inplot
         item <- self$options$vars
         
         infit <- results$infit
         infitlow <- results$infitlow
         infithigh <- results$infithigh
         
-        infit1 <- data.frame(
-          item = factor(item, levels = item),  
-          infit = infit,
-          infitlow = infitlow,
-          infithigh = infithigh,
-          stringsAsFactors = FALSE
-        )
+        infit1 <- data.frame(item, infit, infitlow, infithigh)
+        #self$results$text$setContent(infit1)
         
         image <- self$results$inplot
         image$setState(infit1)
+        
       },
       
       .inPlot = function(image, ggtheme, theme, ...) {
@@ -408,25 +386,23 @@ bfitClass <- if (requireNamespace('jmvcore'))
         
         print(plot)
         TRUE
+        
       },
       
       .prepareOutPlot = function(results) {
+        outplot <- self$results$outplot
+        
         item <- self$options$vars
         
         outfit <- results$outfit
         outfitlow <- results$outfitlow
         outfithigh <- results$outfithigh
         
-        outfit1 <- data.frame(
-          item = factor(item, levels = item),  
-          outfit = outfit,
-          outfitlow = outfitlow,
-          outfithigh = outfithigh,
-          stringsAsFactors = FALSE
-        )
+        outfit1 <- data.frame(item, outfit, outfitlow, outfithigh)
         
         image <- self$results$outplot
         image$setState(outfit1)
+        
       },
       
       .outPlot = function(image, ggtheme, theme, ...) {
@@ -456,18 +432,27 @@ bfitClass <- if (requireNamespace('jmvcore'))
         
         print(plot)
         TRUE
+        
       },
+      
       
       #### Helper functions =================================
       
       .cleanData = function() {
         items <- self$options$vars
-        selected_data <- self$data[items]
-        for (item in items) {
-          selected_data[[item]] <- jmvcore::toNumeric(selected_data[[item]])
-        }
-        selected_data <- na.omit(selected_data)
-        return(selected_data)
+        
+        data <- list()
+        
+        for (item in items)
+          data[[item]] <-
+          jmvcore::toNumeric(self$data[[item]])
+        
+        attr(data, 'row.names') <- seq_len(length(data[[1]]))
+        attr(data, 'class') <- 'data.frame'
+        data <- jmvcore::naOmit(data)
+        
+        return(data)
       }
+      
     )
   )
